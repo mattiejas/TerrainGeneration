@@ -10,7 +10,7 @@ using UnityEngine.UI;
 
 public class TerrainGenerator : MonoBehaviour
 {
-    private const int MapChunkSize = 121;
+    public static int MapChunkSize = 97; // 24 48 72 96 120 144 168 192 216 240
 
     [Range(0, 6)] public int levelOfDetail;
 
@@ -31,6 +31,7 @@ public class TerrainGenerator : MonoBehaviour
     
     
     private Queue<QueuedAction<MapData>> _mapDataActionQueue = new Queue<QueuedAction<MapData>>();
+    private Queue<QueuedAction<MeshData>> _meshDataActionQueue = new Queue<QueuedAction<MeshData>>();
 
     // Start is called before the first frame update
     void Start()
@@ -45,6 +46,15 @@ public class TerrainGenerator : MonoBehaviour
             while (_mapDataActionQueue.Any())
             {
                 var queuedAction = _mapDataActionQueue.Dequeue();
+                queuedAction.Action(queuedAction.Payload);
+            }
+        }
+        
+        lock (_meshDataActionQueue)
+        {
+            while (_meshDataActionQueue.Any())
+            {
+                var queuedAction = _meshDataActionQueue.Dequeue();
                 queuedAction.Action(queuedAction.Payload);
             }
         }
@@ -98,6 +108,7 @@ public class TerrainGenerator : MonoBehaviour
 
     public MeshData GenerateMeshFromHeightmap(float[,] heightmap, AnimationCurve heightCurve, int levelOfDetail)
     {
+        AnimationCurve curve = new AnimationCurve(heightCurve.keys);
         int width = heightmap.GetLength(0);
         int height = heightmap.GetLength(1);
         float topLeftX = (width - 1) / -2f;
@@ -113,15 +124,15 @@ public class TerrainGenerator : MonoBehaviour
         {
             for (int x = 0; x < width; x += meshSimplificationFactor)
             {
-                var y = heightCurve.Evaluate(heightmap[x, z]) * heightMultiplier;
-                meshData.Vertices[vertexIndex] = new Vector3(topLeftX + x, y, topLeftZ + z);
+                var y = curve.Evaluate(heightmap[x, z]) * heightMultiplier;
+                meshData.Vertices[vertexIndex] = new Vector3(x, y, z);
                 meshData.UVs[vertexIndex] = new Vector2(x / (float) width, z / (float) height);
                 
                 // add triangles 
                 if (x < width - 1 && z < height - 1)
                 {
                     meshData.AddTriangle (vertexIndex + numberOfVertices, vertexIndex + numberOfVertices + 1, vertexIndex);
-                    meshData.AddTriangle (vertexIndex + 1 , vertexIndex, vertexIndex + numberOfVertices + 1);
+                    meshData.AddTriangle (vertexIndex + 1, vertexIndex, vertexIndex + numberOfVertices + 1);
                 }
 
                 vertexIndex++;
@@ -170,7 +181,6 @@ public class TerrainGenerator : MonoBehaviour
         };
     }
 
-    // TODO
     public void RequestMapData(Action<MapData> callback)
     {
         void ThreadStart()
@@ -178,7 +188,7 @@ public class TerrainGenerator : MonoBehaviour
             GenerateMapData(callback);
         }
 
-        new Thread((ThreadStart) ThreadStart).Start();
+        new Thread(ThreadStart).Start();
     }
 
     private void GenerateMapData(Action<MapData> callback)
@@ -187,6 +197,25 @@ public class TerrainGenerator : MonoBehaviour
         lock (_mapDataActionQueue)
         {
             _mapDataActionQueue.Enqueue(new QueuedAction<MapData> {Action = callback, Payload = data});
+        }
+    }
+
+    public void RequestMeshData(MapData mapData, Action<MeshData> callback)
+    {
+        void ThreadStart()
+        {
+            GenerateMeshData(mapData, callback);
+        }   
+        
+        new Thread(ThreadStart).Start();
+    }
+
+    private void GenerateMeshData(MapData mapData, Action<MeshData> callback)
+    {
+        var meshData = GenerateMeshFromHeightmap(mapData.HeightMap, heightCurve, levelOfDetail);
+        lock (_meshDataActionQueue)
+        {
+            _meshDataActionQueue.Enqueue(new QueuedAction<MeshData> { Action = callback, Payload = meshData });
         }
     }
 }

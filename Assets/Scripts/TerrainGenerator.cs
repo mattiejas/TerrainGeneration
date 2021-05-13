@@ -12,7 +12,7 @@ public class TerrainGenerator : MonoBehaviour
 {
     public static int MapChunkSize = 97; // 24 48 72 96 120 144 168 192 216 240
 
-    [Range(0, 6)] public int levelOfDetail;
+    [Range(0, 6)] public int previewLevelOfDetail;
 
     public int noiseScale;
     public int heightMultiplier;
@@ -66,10 +66,10 @@ public class TerrainGenerator : MonoBehaviour
         if (octaves < 0) octaves = 0;
     }
 
-    MapData GenerateMapData()
+    MapData GenerateMapData(Vector2 centre)
     {
         var noiseMap = NoiseGenerator.GenerateNoiseMap(MapChunkSize, MapChunkSize, seed, noiseScale, octaves,
-            persistence, lacunarity, offset);
+            persistence, lacunarity, centre + offset);
         var colourMap = GetColourMapFromHeightMap(noiseMap);
         return new MapData {ColourMap = colourMap, HeightMap = noiseMap};
     }
@@ -84,9 +84,12 @@ public class TerrainGenerator : MonoBehaviour
                 float currentHeight = height[x, y];
                 for (int i = 0; i < terrainTypes.Length; i++)
                 {
-                    if (currentHeight <= terrainTypes[i].height)
+                    if (currentHeight >= terrainTypes[i].height)
                     {
                         colourMap[y * MapChunkSize + x] = terrainTypes[i].colour;
+                    }
+                    else
+                    {
                         break;
                     }
                 }
@@ -98,12 +101,12 @@ public class TerrainGenerator : MonoBehaviour
 
     public void Draw()
     {
-        var mapData = GenerateMapData();
+        var mapData = GenerateMapData(Vector2.zero);
         var display = GetComponent<MapDisplay>();
         var texture = TextureGenerator.TextureFromColourMap(mapData.ColourMap, MapChunkSize, MapChunkSize);
 
         display.DrawMinimap(texture);
-        display.DrawMesh(GenerateMeshFromHeightmap(mapData.HeightMap, heightCurve, levelOfDetail), texture);
+        display.DrawMesh(GenerateMeshFromHeightmap(mapData.HeightMap, heightCurve, previewLevelOfDetail), texture);
     }
 
     public MeshData GenerateMeshFromHeightmap(float[,] heightmap, AnimationCurve heightCurve, int levelOfDetail)
@@ -181,38 +184,38 @@ public class TerrainGenerator : MonoBehaviour
         };
     }
 
-    public void RequestMapData(Action<MapData> callback)
+    public void RequestMapData(Vector2 centre, Action<MapData> callback)
     {
         void ThreadStart()
         {
-            GenerateMapData(callback);
+            GenerateMapData(centre, callback);
         }
 
         new Thread(ThreadStart).Start();
     }
 
-    private void GenerateMapData(Action<MapData> callback)
+    private void GenerateMapData(Vector2 centre, Action<MapData> callback)
     {
-        var data = GenerateMapData();
+        var data = GenerateMapData(centre);
         lock (_mapDataActionQueue)
         {
             _mapDataActionQueue.Enqueue(new QueuedAction<MapData> {Action = callback, Payload = data});
         }
     }
 
-    public void RequestMeshData(MapData mapData, Action<MeshData> callback)
+    public void RequestMeshData(MapData mapData, int lod, Action<MeshData> callback)
     {
         void ThreadStart()
         {
-            GenerateMeshData(mapData, callback);
+            GenerateMeshData(mapData, lod, callback);
         }   
         
         new Thread(ThreadStart).Start();
     }
 
-    private void GenerateMeshData(MapData mapData, Action<MeshData> callback)
+    private void GenerateMeshData(MapData mapData, int lod, Action<MeshData> callback)
     {
-        var meshData = GenerateMeshFromHeightmap(mapData.HeightMap, heightCurve, levelOfDetail);
+        var meshData = GenerateMeshFromHeightmap(mapData.HeightMap, heightCurve, lod);
         lock (_meshDataActionQueue)
         {
             _meshDataActionQueue.Enqueue(new QueuedAction<MeshData> { Action = callback, Payload = meshData });

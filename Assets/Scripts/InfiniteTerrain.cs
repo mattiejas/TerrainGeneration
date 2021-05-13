@@ -7,39 +7,56 @@ namespace DefaultNamespace
 {
     public class InfiniteTerrain : MonoBehaviour
     {
-        public const float MaxViewingDistance = 450;
+        private const float ViewerMoveThresholdForChunkUpdate = 25f;
+        private const float SquaredViewerMoveThresholdForChunkUpdate =
+            ViewerMoveThresholdForChunkUpdate * ViewerMoveThresholdForChunkUpdate;
+
+        public LODInfo[] detailLevels;
+        public static float MaxViewingDistance;
+        
         public Transform Viewer;
-        public static Vector2 POV;
         public Material MapMaterial;
 
         private int _chunkSize;
         private int _numberOfChunksVisible;
         private TerrainGenerator _generator;
 
+        public static Vector2 ViewerPosition;
+        private Vector2 _previousViewerPosition;
+        
         private Dictionary<Vector2, TerrainChunk> _chunks = new Dictionary<Vector2, TerrainChunk>();
-        private List<TerrainChunk> _visible = new List<TerrainChunk>();
+        public static List<TerrainChunk> VisibleChunks = new List<TerrainChunk>();
 
         void Start()
         {
+            MaxViewingDistance = detailLevels[detailLevels.Length - 1].visibleDistanceThreshold; 
+            
             _generator = FindObjectOfType<TerrainGenerator>();
             _chunkSize = TerrainGenerator.MapChunkSize - 1;
             _numberOfChunksVisible = Mathf.RoundToInt(MaxViewingDistance / _chunkSize);
+
+            UpdateVisibleChunks();
         }
 
         void Update()
         {
             var position = Viewer.position;
-            POV = new Vector2(position.x, position.z);
-            UpdateVisibleChunks();
+            ViewerPosition = new Vector2(position.x, position.z);
+
+            // if ((_previousViewerPosition - ViewerPosition).sqrMagnitude > SquaredViewerMoveThresholdForChunkUpdate)
+            {
+                _previousViewerPosition = ViewerPosition;
+                UpdateVisibleChunks();
+            }
         }
 
         void UpdateVisibleChunks()
         {
-            _visible.ForEach(x => x.SetVisible(false));
-            _visible.Clear();
+            VisibleChunks.ForEach(x => x.SetVisible(false));
+            VisibleChunks.Clear();
             
-            int x = Mathf.RoundToInt(POV.x / _chunkSize);
-            int y = Mathf.RoundToInt(POV.y / _chunkSize);
+            int x = Mathf.RoundToInt(ViewerPosition.x / _chunkSize);
+            int y = Mathf.RoundToInt(ViewerPosition.y / _chunkSize);
 
             for (int yOffset = -_numberOfChunksVisible; yOffset <= _numberOfChunksVisible; yOffset++)
             {
@@ -49,14 +66,12 @@ namespace DefaultNamespace
 
                     if (_chunks.ContainsKey(chunk))
                     {
-                        _chunks[chunk].Update(MaxViewingDistance, POV);
+                        _chunks[chunk].Update();
                     }
                     else
                     {
-                        _chunks.Add(chunk, new TerrainChunk(_generator, chunk, _chunkSize, transform, MapMaterial));
+                        _chunks.Add(chunk, new TerrainChunk(_generator, chunk, detailLevels, _chunkSize, transform, MapMaterial));
                     }
-                    
-                    if (_chunks[chunk].IsVisible()) _visible.Add(_chunks[chunk]);
                 }
             }
         }
